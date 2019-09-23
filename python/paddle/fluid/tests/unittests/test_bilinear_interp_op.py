@@ -359,5 +359,110 @@ class TestBilinearInterpZero(TestBilinearInterpOp):
         self.align_mode = 0
 
 
+class TestBilinearInterpOpFP16(OpTest):
+    def setUp(self):
+        self.out_size = None
+        self.actual_shape = None
+        self.init_test_case()
+        self.op_type = "bilinear_interp"
+        input_np = np.random.random(self.input_shape).astype("float16")
+
+        if self.scale > 0:
+            out_h = int(self.input_shape[2] * self.scale)
+            out_w = int(self.input_shape[3] * self.scale)
+        else:
+            out_h = self.out_h
+            out_w = self.out_w
+
+        output_np = bilinear_interp_np(input_np, out_h, out_w, self.out_size,
+                                       self.actual_shape, self.align_corners,
+                                       self.align_mode)
+        self.inputs = {'X': input_np}
+        if self.out_size is not None:
+            self.inputs['OutSize'] = self.out_size
+        if self.actual_shape is not None:
+            self.inputs['OutSize'] = self.actual_shape
+
+        self.attrs = {
+            'out_h': self.out_h,
+            'out_w': self.out_w,
+            'scale': self.scale,
+            'interp_method': self.interp_method,
+            'align_corners': self.align_corners,
+            'align_mode': self.align_mode
+        }
+        self.outputs = {'Out': output_np}
+
+    def test_check_output(self):
+        #self.check_output()
+        self.check_output_with_place(place=core.CUDAPlace(0), atol=0.02)
+
+    def test_check_grad(self):
+        #self.check_grad(['X'], 'Out', in_place=True)
+        self.check_grad_with_place(
+            core.CUDAPlace(0), ['X'],
+            'Out',
+            in_place=True,
+            max_relative_error=0.02)
+
+    def init_test_case(self):
+        self.interp_method = 'bilinear'
+        self.input_shape = [2, 3, 4, 4]
+        self.out_h = 2
+        self.out_w = 2
+        self.scale = 0.
+        self.out_size = np.array([3, 3]).astype("int32")
+        self.align_corners = True
+        self.align_mode = 1
+
+
+# class TestBilinearInterpOpFP16(OpTest):
+#     def setUp(self):
+#         self.out_size = None
+#         self.actual_shape = None
+#         self.init_test_case()
+#         self.op_type = "bilinear_interp"
+#         input_np = np.random.randint(
+#             low=0, high=256, size=self.input_shape).astype("float16")
+#
+#         if self.scale > 0:
+#             out_h = int(self.input_shape[2] * self.scale)
+#             out_w = int(self.input_shape[3] * self.scale)
+#         else:
+#             out_h = self.out_h
+#             out_w = self.out_w
+#
+#         output_np = bilinear_interp_np(input_np, out_h, out_w, self.out_size,
+#                                        self.actual_shape, self.align_corners,
+#                                        self.align_mode)
+#         self.inputs = {'X': input_np}
+#         if self.out_size is not None:
+#             self.inputs['OutSize'] = self.out_size
+#
+#         self.attrs = {
+#             'out_h': self.out_h,
+#             'out_w': self.out_w,
+#             'scale': self.scale,
+#             'interp_method': self.interp_method,
+#             'align_corners': self.align_corners,
+#             'align_mode': self.align_mode
+#         }
+#         self.outputs = {'Out': output_np}
+#
+#     def test_check_output(self):
+#         self.check_output_with_place(place=core.CUDAPlace(0), atol=1)
+#
+#     def test_check_grad(self):
+#         self.check_grad_with_place(core.CUDAPlace(0), ['X'], 'Out', in_place=True)
+#
+#     def init_test_case(self):
+#         self.interp_method = 'bilinear'
+#         self.input_shape = [1, 3, 9, 6]
+#         self.out_h = 10
+#         self.out_w = 9
+#         self.scale = 0.
+#         self.align_corners = True
+#         self.align_mode = 1
+
 if __name__ == "__main__":
     unittest.main()
