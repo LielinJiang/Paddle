@@ -495,13 +495,21 @@ class Pad2dOp : public framework::OperatorWithKernel {
       PADDLE_ENFORCE_EQ(paddings.size(), 4,
                         "Size of paddings should be equal to 4.");
       if (data_format == "NCHW") {
-        out_dims[1] = x_dim[1];
-        out_dims[2] = x_dim[2] + paddings[0] + paddings[1];  // height
-        out_dims[3] = x_dim[3] + paddings[2] + paddings[3];  // width
-      } else {                                               // NHWC
-        out_dims[3] = x_dim[3];
-        out_dims[1] = x_dim[1] + paddings[0] + paddings[1];
-        out_dims[2] = x_dim[2] + paddings[2] + paddings[3];
+        out_dims[1] = x_dim[1];  // channel
+        out_dims[2] = ((!ctx->IsRuntime()) && (x_dim[2] < 0))
+                          ? x_dim[2]
+                          : (x_dim[2] + paddings[0] + paddings[1]);  // height
+        out_dims[3] = ((!ctx->IsRuntime()) && (x_dim[3] < 0))
+                          ? x_dim[3]
+                          : (x_dim[3] + paddings[2] + paddings[3]);  // width
+      } else {                                                       // NHWC
+        out_dims[3] = x_dim[3];                                      // channel
+        out_dims[1] = ((!ctx->IsRuntime()) && (x_dim[1] < 0))
+                          ? x_dim[1]
+                          : (x_dim[1] + paddings[0] + paddings[1]);  // height
+        out_dims[2] = ((!ctx->IsRuntime()) && (x_dim[2] < 0))
+                          ? x_dim[2]
+                          : (x_dim[2] + paddings[2] + paddings[3]);  // width
       }
     }
 
@@ -512,8 +520,8 @@ class Pad2dOp : public framework::OperatorWithKernel {
  protected:
   framework::OpKernelType GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
-    return framework::OpKernelType(ctx.Input<Tensor>("X")->type(),
-                                   ctx.GetPlace());
+    return framework::OpKernelType(
+        OperatorWithKernel::IndicateVarDataType(ctx, "X"), ctx.GetPlace());
   }
 };
 
@@ -613,28 +621,29 @@ class Pad2dOpGrad : public framework::OperatorWithKernel {
  protected:
   framework::OpKernelType GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
-    return framework::OpKernelType(
-        ctx.Input<Tensor>(framework::GradVarName("Out"))->type(),
-        ctx.GetPlace());
+    return framework::OpKernelType(OperatorWithKernel::IndicateVarDataType(
+                                       ctx, framework::GradVarName("Out")),
+                                   ctx.GetPlace());
   }
 };
 
-class Pad2dOpGradMaker : public framework::SingleGradOpDescMaker {
+template <typename T>
+class Pad2dOpGradMaker : public framework::SingleGradOpMaker<T> {
  public:
-  using framework::SingleGradOpDescMaker::SingleGradOpDescMaker;
+  using framework::SingleGradOpMaker<T>::SingleGradOpMaker;
 
  protected:
-  std::unique_ptr<framework::OpDesc> Apply() const override {
-    auto* bind = new framework::OpDesc();
-    bind->SetInput("X", Input("X"));
-    if (ForwardOp().Inputs().count("Paddings") > 0) {
-      bind->SetInput("Paddings", Input("Paddings"));
+  std::unique_ptr<T> Apply() const override {
+    auto* bind = new T();
+    bind->SetInput("X", this->Input("X"));
+    if (this->HasInput("Paddings")) {
+      bind->SetInput("Paddings", this->Input("Paddings"));
     }
-    bind->SetInput(framework::GradVarName("Out"), OutputGrad("Out"));
-    bind->SetOutput(framework::GradVarName("X"), InputGrad("X"));
-    bind->SetAttrMap(Attrs());
+    bind->SetInput(framework::GradVarName("Out"), this->OutputGrad("Out"));
+    bind->SetOutput(framework::GradVarName("X"), this->InputGrad("X"));
+    bind->SetAttrMap(this->Attrs());
     bind->SetType("pad2d_grad");
-    return std::unique_ptr<framework::OpDesc>(bind);
+    return std::unique_ptr<T>(bind);
   }
 };
 
@@ -648,7 +657,8 @@ DECLARE_NO_NEED_BUFFER_VARS_INFERENCE(Pad2dOpGradNoNeedBufferVarsInference,
 namespace ops = paddle::operators;
 
 REGISTER_OPERATOR(pad2d, ops::Pad2dOp, ops::Pad2dOpMaker,
-                  ops::Pad2dOpGradMaker);
+                  ops::Pad2dOpGradMaker<paddle::framework::OpDesc>,
+                  ops::Pad2dOpGradMaker<paddle::imperative::OpBase>);
 REGISTER_OPERATOR(pad2d_grad, ops::Pad2dOpGrad,
                   ops::Pad2dOpGradNoNeedBufferVarsInference);
 REGISTER_OP_CPU_KERNEL(pad2d, ops::Pad2dCPUKernel<float>);

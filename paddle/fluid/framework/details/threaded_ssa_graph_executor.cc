@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include "paddle/fluid/framework/details/threaded_ssa_graph_executor.h"
-
 #include "paddle/fluid/framework/ir/graph_helper.h"
 #include "paddle/fluid/platform/profiler.h"
 
@@ -22,9 +21,11 @@ namespace framework {
 namespace details {
 ThreadedSSAGraphExecutor::ThreadedSSAGraphExecutor(
     const ExecutionStrategy &strategy, const std::vector<Scope *> &local_scopes,
+    const std::vector<Scope *> &local_exec_scopes,
     const std::vector<platform::Place> &places, ir::Graph *graph)
     : graph_(graph),
       local_scopes_(local_scopes),
+      local_exec_scopes_(local_exec_scopes),
       places_(places),
       fetch_ctxs_(places),
       strategy_(strategy),
@@ -80,9 +81,9 @@ inline FeedFetchList ThreadedSSAGraphExecutor::RunImpl(
     // run the recorded operators directly. This strategy could make the
     // execution faster.
     VLOG(3) << "Run the traced ops.";
-    RunTracedOps(traced_ops_);
-    RunTracedOps(fetch_ops);
-    if (exception_holder_.IsCaught()) {
+    bool is_exception_free =
+        RunTracedOps(traced_ops_) && RunTracedOps(fetch_ops);
+    if (!is_exception_free) {
       ExecutionFinal(&fetch_ops);
     }
   } else {
@@ -155,7 +156,9 @@ void ThreadedSSAGraphExecutor::InsertFetchOps(
     FeedFetchList *fetch_data) {
   std::unordered_map<std::string, std::vector<VarHandleBase *>> fetched_vars;
   std::unordered_set<VarHandleBase *> local_ready_vars;
-  for (auto &fetch_var_name : fetch_tensors) {
+  std::unordered_set<std::string> fetch_tensor_set(fetch_tensors.begin(),
+                                                   fetch_tensors.end());
+  for (auto &fetch_var_name : fetch_tensor_set) {
     for (auto &var_map : graph_->Get<details::GraphVars>(details::kGraphVars)) {
       auto it = var_map.find(fetch_var_name);
       if (it != var_map.end()) {
@@ -176,7 +179,8 @@ void ThreadedSSAGraphExecutor::InsertFetchOps(
 
     ir::Node *fetch_node =
         graph_->CreateEmptyNode("fetch", ir::Node::Type::kOperation);
-    auto *op = new FetchOpHandle(fetch_node, fetch_data, i, &local_scopes_);
+    auto *op = new FetchOpHandle(fetch_node, fetch_data, i, &local_scopes_,
+                                 &local_exec_scopes_);
     fetch_ops->emplace_back(op);
 
     for (auto &p : places_) {
@@ -304,27 +308,25 @@ void ThreadedSSAGraphExecutor::RunOp(
   RecordOps(op);
 }
 
-void ThreadedSSAGraphExecutor::RunTracedOps(
+bool ThreadedSSAGraphExecutor::RunTracedOps(
     const std::vector<OpHandleBase *> &traced_ops) {
   for (auto &op : traced_ops) {
-    if (exception_holder_.IsCaught()) {
-      return;
-    }
-    RunOpSync(op);
+    if (!RunOpSync(op)) return false;
   }
+  return true;
 }
 
-void ThreadedSSAGraphExecutor::RunOpSync(OpHandleBase *op) {
+bool ThreadedSSAGraphExecutor::RunOpSync(OpHandleBase *op) {
   try {
-    if (VLOG_IS_ON(10)) {
-      VLOG(10) << op << " " << op->Name() << " : " << op->DebugString();
-    }
+    VLOG(10) << op << " " << op->Name() << " : " << op->DebugString();
     if (LIKELY(!strategy_.dry_run_)) {
       op->Run(strategy_.use_cuda_);
     }
     VLOG(10) << op << " " << op->Name() << " Done ";
+    return true;
   } catch (...) {
     exception_holder_.Catch(std::current_exception());
+    return false;
   }
 }
 

@@ -91,6 +91,7 @@ class RNNMemoryHelperGradOp : public framework::OperatorBase {
 
     auto in_grad_var_name = Output(framework::GradVarName("X"));
     auto *in_grad_var = scope.FindVar(in_grad_var_name);
+
     PADDLE_ENFORCE(in_grad_var != nullptr,
                    "Cannot find in_grad_var in scope, name is %s",
                    in_grad_var_name);
@@ -106,7 +107,7 @@ class RNNMemoryHelperGradOp : public framework::OperatorBase {
 
       framework::AttributeMap attrs;
       attrs["dtype"] = in_var_tensor.type();
-      attrs["shape"] = framework::vectorize2int(in_var_tensor.dims());
+      attrs["shape"] = framework::vectorize<int>(in_var_tensor.dims());
       attrs["value"] = 0.0f;
 
       auto zero_op = framework::OpRegistry::CreateOp(
@@ -155,10 +156,12 @@ class RNNMemoryHelperGradOpShapeInference : public framework::InferShapeBase {
 }  // namespace operators
 }  // namespace paddle
 
-REGISTER_OPERATOR(rnn_memory_helper, paddle::operators::RNNMemoryHelperOp,
-                  paddle::operators::RNNMemoryHelperOpInfoMaker,
-                  paddle::operators::RNNMemoryHelperOpShapeInference,
-                  paddle::framework::DefaultGradOpDescMaker<true>);
+REGISTER_OPERATOR(
+    rnn_memory_helper, paddle::operators::RNNMemoryHelperOp,
+    paddle::operators::RNNMemoryHelperOpInfoMaker,
+    paddle::operators::RNNMemoryHelperOpShapeInference,
+    paddle::framework::DefaultGradOpMaker<paddle::framework::OpDesc, true>,
+    paddle::framework::DefaultGradOpMaker<paddle::imperative::OpBase, true>);
 REGISTER_OPERATOR(rnn_memory_helper_grad,
                   paddle::operators::RNNMemoryHelperGradOp,
                   paddle::operators::RNNMemoryHelperGradOpInfoMaker,

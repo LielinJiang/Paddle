@@ -73,7 +73,7 @@ class DetectionMAPOp : public framework::OperatorWithKernel {
   framework::OpKernelType GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
     return framework::OpKernelType(
-        ctx.Input<framework::Tensor>("DetectRes")->type(),
+        OperatorWithKernel::IndicateVarDataType(ctx, "DetectRes"),
         platform::CPUPlace());
   }
 };
@@ -150,7 +150,7 @@ class DetectionMAPOpMaker : public framework::OpProtoAndCheckerMaker {
                  "The class number.");
     AddAttr<int>(
         "background_label",
-        "(int, defalut: 0) "
+        "(int, default: 0) "
         "The index of background label, the background label will be ignored. "
         "If set to -1, then all categories will be considered.")
         .SetDefault(0);
@@ -191,8 +191,10 @@ https://arxiv.org/abs/1512.02325
 }  // namespace paddle
 
 namespace ops = paddle::operators;
-REGISTER_OPERATOR(detection_map, ops::DetectionMAPOp, ops::DetectionMAPOpMaker,
-                  paddle::framework::EmptyGradOpMaker);
+REGISTER_OPERATOR(
+    detection_map, ops::DetectionMAPOp, ops::DetectionMAPOpMaker,
+    paddle::framework::EmptyGradOpMaker<paddle::framework::OpDesc>,
+    paddle::framework::EmptyGradOpMaker<paddle::imperative::OpBase>);
 REGISTER_OP_CPU_KERNEL(
     detection_map, ops::DetectionMAPOpKernel<paddle::platform::CPUPlace, float>,
     ops::DetectionMAPOpKernel<paddle::platform::CPUPlace, double>);

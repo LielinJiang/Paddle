@@ -81,11 +81,15 @@ class HierarchicalSigmoidOp : public framework::OperatorWithKernel {
  protected:
   framework::OpKernelType GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
-    return framework::OpKernelType(ctx.Input<framework::LoDTensor>("X")->type(),
-                                   ctx.GetPlace());
+    return framework::OpKernelType(
+        OperatorWithKernel::IndicateVarDataType(ctx, "X"), ctx.GetPlace());
   }
 };
 
+/*
+ * Inputs: X, W, Label, PathTable, PathCode, Bias
+ * Outputs: Out, PreOut, W_out
+ */
 template <typename AttrType>
 class HierarchicalSigmoidOpMaker : public framework::OpProtoAndCheckerMaker {
  public:
@@ -162,6 +166,38 @@ Hierarchical Probabilistic Neural Network Language Model."
   }
 };
 
+/*
+ * Inputs: X, W, Label, PathTable, PathCode, PreOut, Out@GRAD
+ * Outputs: X@GRAD, W@GRAD, Bias@GRAD
+ */
+template <typename T>
+class HierarchicalSigmoidGradMaker : public framework::SingleGradOpMaker<T> {
+ public:
+  using framework::SingleGradOpMaker<T>::SingleGradOpMaker;
+
+  std::unique_ptr<T> Apply() const override {
+    auto* op = new T();
+    op->SetType(this->ForwardOpType() + "_grad");
+    // Inputs: X, W, Label, PathTable, PathCode, PreOut, Out@GRAD
+    op->SetInput("X", this->Input("X"));
+    op->SetInput("W", this->Input("W"));
+    op->SetInput("Bias", this->Input("Bias"));
+    op->SetInput("Label", this->Input("Label"));
+    op->SetInput("PathTable", this->Input("PathTable"));
+    op->SetInput("PathCode", this->Input("PathCode"));
+    op->SetInput("PreOut", this->Output("PreOut"));
+    op->SetInput(framework::GradVarName("Out"), this->OutputGrad("Out"));
+
+    // Outputs: X@GRAD, W@GRAD, Bias@GRAD
+    op->SetOutput(framework::GradVarName("X"), this->InputGrad("X"));
+    op->SetOutput(framework::GradVarName("W"), this->InputGrad("W"));
+    op->SetOutput(framework::GradVarName("Bias"), this->InputGrad("Bias"));
+    op->SetAttrMap(this->Attrs());
+
+    return std::unique_ptr<T>(op);
+  }
+};
+
 class HierarchicalSigmoidGradOp : public framework::OperatorWithKernel {
  public:
   using framework::OperatorWithKernel::OperatorWithKernel;
@@ -189,8 +225,8 @@ class HierarchicalSigmoidGradOp : public framework::OperatorWithKernel {
  protected:
   framework::OpKernelType GetExpectedKernelType(
       const framework::ExecutionContext& ctx) const override {
-    return framework::OpKernelType(ctx.Input<framework::LoDTensor>("X")->type(),
-                                   ctx.GetPlace());
+    return framework::OpKernelType(
+        OperatorWithKernel::IndicateVarDataType(ctx, "X"), ctx.GetPlace());
   }
 };
 
@@ -209,17 +245,17 @@ class HierarchicalSigmoidGradOpGradVarTypeInference
     auto attr = ctx->GetAttr("is_sparse");
     bool is_sparse = boost::get<bool>(attr);
     if (is_sparse) {
-      VLOG(30) << "hierarchical_sigmoid_grad op " << framework::GradVarName("W")
-               << " is set to SelectedRows";
+      VLOG(3) << "hierarchical_sigmoid_grad op " << framework::GradVarName("W")
+              << " is set to SelectedRows";
       ctx->SetType(w_grad_var_name, framework::proto::VarType::SELECTED_ROWS);
     } else {
-      VLOG(30) << "hierarchical_sigmoid_grad op " << framework::GradVarName("W")
-               << " is set to LoDTensor";
+      VLOG(3) << "hierarchical_sigmoid_grad op " << framework::GradVarName("W")
+              << " is set to LoDTensor";
       ctx->SetType(w_grad_var_name, framework::proto::VarType::LOD_TENSOR);
     }
     if (hasBias) {
-      VLOG(30) << "hierarchical_sigmoid_grad op "
-               << framework::GradVarName("Bias") << " is set to LoDTensor";
+      VLOG(3) << "hierarchical_sigmoid_grad op "
+              << framework::GradVarName("Bias") << " is set to LoDTensor";
       ctx->SetType(bias_grad_var_name, framework::proto::VarType::LOD_TENSOR);
     }
     ctx->SetDataType(w_grad_var_name, ctx->GetDataType(ctx->Input("W")[0]));
@@ -230,9 +266,11 @@ class HierarchicalSigmoidGradOpGradVarTypeInference
 }  // namespace paddle
 
 namespace ops = paddle::operators;
-REGISTER_OPERATOR(hierarchical_sigmoid, ops::HierarchicalSigmoidOp,
-                  ops::HierarchicalSigmoidOpMaker<int>,
-                  paddle::framework::DefaultGradOpDescMaker<true>);
+REGISTER_OPERATOR(
+    hierarchical_sigmoid, ops::HierarchicalSigmoidOp,
+    ops::HierarchicalSigmoidOpMaker<int>,
+    ops::HierarchicalSigmoidGradMaker<paddle::framework::OpDesc>,
+    ops::HierarchicalSigmoidGradMaker<paddle::imperative::OpBase>);
 REGISTER_OPERATOR(hierarchical_sigmoid_grad, ops::HierarchicalSigmoidGradOp,
                   ops::HierarchicalSigmoidGradOpGradVarTypeInference);
 REGISTER_OP_CPU_KERNEL(

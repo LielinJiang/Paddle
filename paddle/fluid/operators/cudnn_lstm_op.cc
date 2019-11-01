@@ -45,7 +45,11 @@ class CudnnLSTMOp : public framework::OperatorWithKernel {
     auto in_dims = ctx->GetInputDim("Input");
     PADDLE_ENFORCE_EQ(in_dims.size(), 3, "Input(X)'s rank must be 3.");
 
-    ctx->SetOutputDim("Out", ctx->GetInputDim("Input"));
+    auto out_dims = in_dims;
+    auto hidden_size = ctx->Attrs().Get<int>("hidden_size");
+    out_dims[2] = hidden_size;
+
+    ctx->SetOutputDim("Out", out_dims);
     ctx->SetOutputDim("last_h", ctx->GetInputDim("InitH"));
     ctx->SetOutputDim("last_c", ctx->GetInputDim("InitC"));
   }
@@ -193,31 +197,32 @@ class CudnnLSTMGradOp : public framework::OperatorWithKernel {
   }
 };
 
-class CudnnLSTMGradOpDescMaker : public framework::SingleGradOpDescMaker {
+template <typename T>
+class CudnnLSTMGradOpMaker : public framework::SingleGradOpMaker<T> {
  public:
-  using framework::SingleGradOpDescMaker::SingleGradOpDescMaker;
+  using framework::SingleGradOpMaker<T>::SingleGradOpMaker;
 
  protected:
-  std::unique_ptr<framework::OpDesc> Apply() const override {
-    std::unique_ptr<framework::OpDesc> op(new framework::OpDesc());
+  std::unique_ptr<T> Apply() const override {
+    std::unique_ptr<T> op(new T());
     op->SetType("cudnn_lstm_grad");
-    op->SetInput("Input", Input("Input"));
-    op->SetInput("InitH", Input("InitH"));
-    op->SetInput("InitC", Input("InitC"));
-    op->SetInput("W", Input("W"));
-    if (ForwardOp().Inputs().count("Cache") > 0) {
-      op->SetInput("Cache", Input("Cache"));
+    op->SetInput("Input", this->Input("Input"));
+    op->SetInput("InitH", this->Input("InitH"));
+    op->SetInput("InitC", this->Input("InitC"));
+    op->SetInput("W", this->Input("W"));
+    if (this->HasInput("Cache")) {
+      op->SetInput("Cache", this->Input("Cache"));
     }
-    op->SetInput("Out", Output("Out"));
-    op->SetInput(framework::GradVarName("Out"), OutputGrad("Out"));
-    op->SetInput(framework::GradVarName("last_c"), OutputGrad("last_c"));
-    op->SetInput(framework::GradVarName("last_h"), OutputGrad("last_h"));
+    op->SetInput("Out", this->Output("Out"));
+    op->SetInput(framework::GradVarName("Out"), this->OutputGrad("Out"));
+    op->SetInput(framework::GradVarName("last_c"), this->OutputGrad("last_c"));
+    op->SetInput(framework::GradVarName("last_h"), this->OutputGrad("last_h"));
 
-    op->SetOutput(framework::GradVarName("Input"), InputGrad("Input"));
-    op->SetOutput(framework::GradVarName("W"), InputGrad("W"));
-    op->SetOutput(framework::GradVarName("InitH"), InputGrad("InitH"));
-    op->SetOutput(framework::GradVarName("InitC"), InputGrad("InitC"));
-    op->SetAttrMap(Attrs());
+    op->SetOutput(framework::GradVarName("Input"), this->InputGrad("Input"));
+    op->SetOutput(framework::GradVarName("W"), this->InputGrad("W"));
+    op->SetOutput(framework::GradVarName("InitH"), this->InputGrad("InitH"));
+    op->SetOutput(framework::GradVarName("InitC"), this->InputGrad("InitC"));
+    op->SetAttrMap(this->Attrs());
     return op;
   }
 };
@@ -236,7 +241,8 @@ class NotImpleKernel : public framework::OpKernel<T> {
 
 namespace ops = paddle::operators;
 REGISTER_OPERATOR(cudnn_lstm, ops::CudnnLSTMOp, ops::CudnnLSTMOpMaker,
-                  ops::CudnnLSTMGradOpDescMaker);
+                  ops::CudnnLSTMGradOpMaker<paddle::framework::OpDesc>,
+                  ops::CudnnLSTMGradOpMaker<paddle::imperative::OpBase>);
 REGISTER_OPERATOR(cudnn_lstm_grad, ops::CudnnLSTMGradOp);
 
 REGISTER_OP_CPU_KERNEL(cudnn_lstm, ops::NotImpleKernel<float>);
